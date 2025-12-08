@@ -29,9 +29,9 @@ def get_brands():
     for row in rows:
         brands_list.append({
             'id': row[0],
-            'brand_name': row[1],
-            'model': row[2],
-            'description': row[3]
+            'Phone': row[1],
+            'Desktop': row[2],
+            'Laptop': row[3]
         })
 
     # Check for output format
@@ -43,8 +43,6 @@ def get_brands():
         return response
     else:
         return jsonify(brands_list)
-
-
 
 if __name__ == '__main__':
     app.run(debug=True)
