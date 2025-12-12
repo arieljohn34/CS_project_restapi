@@ -188,6 +188,36 @@ def delete_brand(id):
     cursor.close()
     return jsonify({"message": "Brand deleted"}), 200
 
+@brands_bp.route("/search", methods=["GET"])
+def search_brands():
+    phone = request.args.get("phone")
+    desktop = request.args.get("desktop")
+    laptop = request.args.get("laptop")
+
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+
+    query = "SELECT * FROM brands WHERE 1=1"
+    params = []
+
+    if phone:
+        query += " AND Phone LIKE %s"
+        params.append(f"%{phone}%")
+
+    if desktop:
+        query += " AND Desktop LIKE %s"
+        params.append(f"%{desktop}%")
+
+    if laptop:
+        query += " AND Laptop LIKE %s"
+        params.append(f"%{laptop}%")
+
+    cursor.execute(query, params)
+    results = cursor.fetchall()
+    cursor.close()
+
+    return jsonify(results), 200
+
+
 # Register blueprint
 app.register_blueprint(brands_bp)
 
