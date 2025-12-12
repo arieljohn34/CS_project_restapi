@@ -4,6 +4,7 @@ import MySQLdb.cursors
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, set_access_cookies
 from datetime import timedelta
+import json  # <-- added for JSON encoding
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey123"
@@ -76,7 +77,9 @@ def login():
         cursor.close()
 
         if account and check_password_hash(account["password"], password):
-            access_token = create_access_token(identity={"email": account["email"], "role": account["role"]})
+            # Encode the identity as JSON string
+            identity = json.dumps({"email": account["email"], "role": account["role"]})
+            access_token = create_access_token(identity=identity)
             
             # Use Flask-JWT-Extended helper to set cookie
             resp = make_response(redirect(url_for('brands.get_brands')))
@@ -86,6 +89,7 @@ def login():
         return render_template("login.html", error="Invalid credentials.")
 
     return render_template("login.html")
+
 # -------------------------
 # Brands Blueprint
 # -------------------------
@@ -94,6 +98,9 @@ brands_bp = Blueprint('brands', __name__, url_prefix='/api/brands')
 @brands_bp.route("", methods=["GET"])
 @jwt_required()
 def get_brands():
+    # Decode JWT identity
+    current_user = json.loads(get_jwt_identity())
+    print("Current user:", current_user)  # optional debug
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     cursor.execute("SELECT * FROM brands")
     brands = cursor.fetchall()
@@ -103,6 +110,7 @@ def get_brands():
 @brands_bp.route("/<int:id>", methods=["GET"])
 @jwt_required()
 def get_brand(id):
+    current_user = json.loads(get_jwt_identity())
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     cursor.execute("SELECT * FROM brands WHERE idbrands=%s", (id,))
     brand = cursor.fetchone()
@@ -114,6 +122,7 @@ def get_brand(id):
 @brands_bp.route("", methods=["POST"])
 @jwt_required()
 def create_brand():
+    current_user = json.loads(get_jwt_identity())
     data = request.get_json()
     phone = data.get("Phone")
     desktop = data.get("Desktop")
@@ -132,6 +141,7 @@ def create_brand():
 @brands_bp.route("/<int:id>", methods=["PUT"])
 @jwt_required()
 def update_brand(id):
+    current_user = json.loads(get_jwt_identity())
     data = request.get_json()
     phone = data.get("Phone")
     desktop = data.get("Desktop")
@@ -152,6 +162,7 @@ def update_brand(id):
 @brands_bp.route("/<int:id>", methods=["DELETE"])
 @jwt_required()
 def delete_brand(id):
+    current_user = json.loads(get_jwt_identity())
     cursor = mysql.connection.cursor()
     cursor.execute("SELECT * FROM brands WHERE idbrands=%s", (id,))
     brand = cursor.fetchone()
@@ -167,6 +178,7 @@ def delete_brand(id):
 @brands_bp.route("/search", methods=["GET"])
 @jwt_required()
 def search_brands():
+    current_user = json.loads(get_jwt_identity())
     phone = request.args.get("phone")
     desktop = request.args.get("desktop")
     laptop = request.args.get("laptop")
