@@ -1,39 +1,34 @@
-from flask import Flask, request, render_template, redirect, url_for, jsonify, Blueprint
+from flask import Flask, request, render_template, redirect, url_for, jsonify, Blueprint, make_response
 from flask_mysqldb import MySQL
 import MySQLdb.cursors
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, set_access_cookies
 from datetime import timedelta
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey123"
 
-# -------------------------
-# MySQL Configuration
-# -------------------------
+# MySQL Configuration 
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = 'johnjohn123'
 app.config['MYSQL_DB'] = 'arieljohnsql'
 mysql = MySQL(app)
 
-# -------------------------
 # JWT Configuration
-# -------------------------
 app.config["JWT_SECRET_KEY"] = "jwtsecretkey123"
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
+app.config["JWT_TOKEN_LOCATION"] = ["cookies"]
+app.config["JWT_COOKIE_SECURE"] = False
+app.config["JWT_COOKIE_CSRF_PROTECT"] = False
 jwt = JWTManager(app)
 
-# -------------------------
 # Home route
-# -------------------------
 @app.route("/")
 def home():
     return redirect(url_for('login'))
 
-# -------------------------
 # Registration
-# -------------------------
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
@@ -47,28 +42,25 @@ def register():
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
         cursor.execute("SELECT * FROM accounts WHERE email=%s", (email,))
         exists = cursor.fetchone()
+        cursor.close()
 
         if exists:
-            cursor.close()
             return jsonify({"error": "Account already exists"}), 409
 
         hashed_password = generate_password_hash(password)
-        access_token = create_access_token(identity={"email": email, "role": role})
-
+        cursor = mysql.connection.cursor()
         cursor.execute(
-            "INSERT INTO accounts (email, password, role, jwt_token) VALUES (%s, %s, %s, %s)",
-            (email, hashed_password, role, access_token)
+            "INSERT INTO accounts (email, password, role) VALUES (%s, %s, %s)",
+            (email, hashed_password, role)
         )
         mysql.connection.commit()
         cursor.close()
 
-        return jsonify({"message": "Account created successfully!", "access_token": access_token}), 201
+        return jsonify({"message": "Account created successfully!"}), 201
 
     return render_template("register.html")
 
-# -------------------------
-# Login
-# -------------------------
+# Login (read-only, store JWT in cookie)
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -76,7 +68,7 @@ def login():
         password = request.form.get("password")
 
         if not email or not password:
-            return jsonify({"error": "Email and Password are required"}), 400
+            return render_template("login.html", error="Email and password are required.")
 
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
         cursor.execute("SELECT * FROM accounts WHERE email=%s", (email,))
@@ -85,42 +77,22 @@ def login():
 
         if account and check_password_hash(account["password"], password):
             access_token = create_access_token(identity={"email": account["email"], "role": account["role"]})
+            
+            # Use Flask-JWT-Extended helper to set cookie
+            resp = make_response(redirect(url_for('brands.get_brands')))
+            set_access_cookies(resp, access_token)
+            return resp
 
-            # Store token in database
-            cursor = mysql.connection.cursor()
-            cursor.execute("UPDATE accounts SET jwt_token=%s WHERE email=%s", (access_token, email))
-            mysql.connection.commit()
-            cursor.close()
-
-            # Redirect to dashboard
-            return redirect(url_for('dashboard'))
-
-        return jsonify({"error": "Invalid credentials"}), 401
+        return render_template("login.html", error="Invalid credentials.")
 
     return render_template("login.html")
-
-# -------------------------
-# Dashboard (JWT Protected)
-# -------------------------
-@app.route("/dashboard", methods=["GET"])
-@jwt_required()
-def dashboard():
-    identity = get_jwt_identity()
-    return jsonify({"message": f"Welcome {identity['email']}! Your role is {identity['role']}."})
-
-# -------------------------
-# Logout
-# -------------------------
-@app.route("/logout", methods=["POST"])
-def logout():
-    return jsonify({"message": "You have been logged out. Discard your token on the client side."})
-
 # -------------------------
 # Brands Blueprint
 # -------------------------
 brands_bp = Blueprint('brands', __name__, url_prefix='/api/brands')
 
 @brands_bp.route("", methods=["GET"])
+@jwt_required()
 def get_brands():
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     cursor.execute("SELECT * FROM brands")
@@ -129,6 +101,7 @@ def get_brands():
     return jsonify(brands), 200
 
 @brands_bp.route("/<int:id>", methods=["GET"])
+@jwt_required()
 def get_brand(id):
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     cursor.execute("SELECT * FROM brands WHERE idbrands=%s", (id,))
@@ -139,6 +112,7 @@ def get_brand(id):
     return jsonify(brand), 200
 
 @brands_bp.route("", methods=["POST"])
+@jwt_required()
 def create_brand():
     data = request.get_json()
     phone = data.get("Phone")
@@ -156,6 +130,7 @@ def create_brand():
     return jsonify({"message": "Brand created", "id": brand_id}), 201
 
 @brands_bp.route("/<int:id>", methods=["PUT"])
+@jwt_required()
 def update_brand(id):
     data = request.get_json()
     phone = data.get("Phone")
@@ -175,6 +150,7 @@ def update_brand(id):
     return jsonify({"message": "Brand updated"}), 200
 
 @brands_bp.route("/<int:id>", methods=["DELETE"])
+@jwt_required()
 def delete_brand(id):
     cursor = mysql.connection.cursor()
     cursor.execute("SELECT * FROM brands WHERE idbrands=%s", (id,))
@@ -189,24 +165,22 @@ def delete_brand(id):
     return jsonify({"message": "Brand deleted"}), 200
 
 @brands_bp.route("/search", methods=["GET"])
+@jwt_required()
 def search_brands():
     phone = request.args.get("phone")
     desktop = request.args.get("desktop")
     laptop = request.args.get("laptop")
 
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-
     query = "SELECT * FROM brands WHERE 1=1"
     params = []
 
     if phone:
         query += " AND Phone LIKE %s"
         params.append(f"%{phone}%")
-
     if desktop:
         query += " AND Desktop LIKE %s"
         params.append(f"%{desktop}%")
-
     if laptop:
         query += " AND Laptop LIKE %s"
         params.append(f"%{laptop}%")
@@ -214,15 +188,10 @@ def search_brands():
     cursor.execute(query, params)
     results = cursor.fetchall()
     cursor.close()
-
     return jsonify(results), 200
-
 
 # Register blueprint
 app.register_blueprint(brands_bp)
 
-# -------------------------
-# Run App
-# -------------------------
 if __name__ == "__main__":
     app.run(debug=True)
