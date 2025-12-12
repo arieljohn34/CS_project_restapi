@@ -71,25 +71,38 @@ def login():
         if not email or not password:
             return render_template("login.html", error="Email and password are required.")
 
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute("SELECT * FROM accounts WHERE email=%s", (email,))
-        account = cursor.fetchone()
-        cursor.close()
+        # Debug: show the email being used
+        print(f"[DEBUG] Login attempt for email: {email}")
 
-        if account and check_password_hash(account["password"], password):
+        try:
+            cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+            cursor.execute("SELECT * FROM accounts WHERE email=%s", (email,))
+            account = cursor.fetchone()
+            cursor.close()
+
+            print(f"[DEBUG] Account fetched from DB: {account}")  # Debug DB read
+
+            if not account:
+                return render_template("login.html", error="User not found.")
+
+            # Check hashed password
+            if not check_password_hash(account["password"], password):
+                return render_template("login.html", error="Invalid password.")
+
             # Create JWT token
-            identity = json.dumps({"email": account["email"], "role": account["role"]})
+            identity = {"email": account["email"], "role": account["role"]}
             access_token = create_access_token(identity=identity)
 
-            # Print token in console
-            print(f"JWT token for user {account['email']}: {access_token}")
+            print(f"[DEBUG] JWT token created: {access_token}")  # Debug JWT
 
-            # Set token as cookie and redirect to brands API
+            # Set token in cookie and redirect
             resp = make_response(redirect("/api/brands"))
             set_access_cookies(resp, access_token)
             return resp
 
-        return render_template("login.html", error="Invalid credentials.")
+        except Exception as e:
+            print(f"[ERROR] Login error: {e}")
+            return render_template("login.html", error="Internal server error.")
 
     return render_template("login.html")
 
